@@ -3,13 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>航段时间清洗 · DST 安全入仓</title>
+<title>航段时间清洗 · DST 安全入仓 / 分区回填计划</title>
 <style>
   :root {
     --bg: #0f1720; --panel: #18222e; --panel2: #1f2c3b; --line: #2c3d50;
     --text: #e6edf3; --muted: #8fa3b8; --accent: #4da3ff;
     --green: #2ea043; --green-bg: #12261a; --red: #f85149; --red-bg: #2d1416;
     --amber: #d29922; --amber-bg: #2b2110; --gray-bg: #1c242e;
+    --purple: #a371f7; --purple-bg: #221a33;
   }
   * { box-sizing: border-box; }
   body {
@@ -17,11 +18,22 @@
     font: 14px/1.6 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   }
   header {
-    padding: 20px 28px; border-bottom: 1px solid var(--line);
+    padding: 20px 28px 0; border-bottom: 1px solid var(--line);
     background: linear-gradient(180deg, #16202c, #101822);
   }
   header h1 { margin: 0 0 4px; font-size: 20px; }
-  header p { margin: 0; color: var(--muted); }
+  header p { margin: 0 0 14px; color: var(--muted); }
+  nav { display: flex; gap: 6px; }
+  nav button {
+    background: transparent; color: var(--muted); border: 1px solid transparent;
+    border-bottom: 2px solid transparent; border-radius: 8px 8px 0 0;
+    padding: 9px 18px; font-weight: 600; font-size: 14.5px; cursor: pointer;
+  }
+  nav button.active {
+    color: var(--accent); background: var(--panel);
+    border-color: var(--line); border-bottom-color: var(--panel);
+    position: relative; top: 1px;
+  }
   main { max-width: 1180px; margin: 0 auto; padding: 20px 28px 60px; }
   .card {
     background: var(--panel); border: 1px solid var(--line);
@@ -52,6 +64,7 @@
   .chip.green { color: #7ee2a0; border-color: var(--green); }
   .chip.red { color: #ff9d97; border-color: var(--red); }
   .chip.amber { color: #f0c36d; border-color: var(--amber); }
+  .chip.purple { color: #c9a7ff; border-color: var(--purple); }
   .tail-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
   .tail-head h2 { margin: 0; font-size: 17px; }
   .badge { padding: 3px 12px; border-radius: 999px; font-size: 12.5px; font-weight: 700; }
@@ -60,7 +73,7 @@
   .badge.multiple { background: var(--amber-bg); color: #f0c36d; border: 1px solid var(--amber); }
   .badge.error { background: var(--red-bg); color: #ff9d97; border: 1px solid var(--red); }
   .note { color: var(--muted); font-size: 13px; }
-  .conflict-box {
+  .conflict-box, .error-box {
     background: var(--red-bg); border: 1px solid var(--red);
     border-radius: 8px; padding: 10px 14px; margin-top: 10px;
   }
@@ -68,25 +81,60 @@
     background: var(--amber-bg); border: 1px solid var(--amber);
     border-radius: 8px; padding: 10px 14px; margin-top: 10px;
   }
-  .error-box {
-    background: var(--red-bg); border: 1px solid var(--red);
-    border-radius: 8px; padding: 10px 14px; margin-top: 10px;
-  }
   .cand { color: var(--amber); }
   .chosen { color: #7ee2a0; font-weight: 700; }
   .sol-block { margin-top: 10px; border: 1px dashed var(--line); border-radius: 8px; padding: 8px 12px; }
   .sol-block h4 { margin: 4px 0; color: var(--amber); }
-  #global-error { display: none; }
+  #global-error, #bf-error { display: none; }
   .spacer { flex: 1; }
   footer { color: var(--muted); text-align: center; padding: 24px; font-size: 12.5px; }
+  .hidden { display: none !important; }
+
+  /* 回填计划 */
+  .file-slot {
+    display: flex; flex-direction: column; gap: 6px;
+    background: var(--panel2); border: 1px solid var(--line);
+    border-radius: 8px; padding: 10px 14px; min-width: 300px; flex: 1;
+  }
+  .file-slot .slot-title { font-weight: 700; font-size: 13.5px; }
+  .file-slot .slot-title .tag {
+    font-size: 11px; padding: 1px 8px; border-radius: 999px; margin-left: 6px;
+  }
+  .tag.wh { background: var(--gray-bg); color: var(--muted); border: 1px solid var(--line); }
+  .tag.co { background: var(--green-bg); color: #7ee2a0; border: 1px solid var(--green); }
+  .batch-card { border-left: 3px solid var(--accent); }
+  .batch-card.migration { border-left-color: var(--purple); }
+  .batch-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .batch-head h2 { margin: 0; font-size: 16px; }
+  .badge.migration { background: var(--purple-bg); color: #c9a7ff; border: 1px solid var(--purple); }
+  .badge.standalone { background: var(--gray-bg); color: var(--muted); border: 1px solid var(--line); }
+  .badge.cleared { background: var(--amber-bg); color: #f0c36d; border: 1px solid var(--amber); }
+  .partition-block {
+    border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px 14px; margin-top: 12px; background: var(--panel2);
+  }
+  .partition-block.cleared { border-color: var(--amber); border-style: dashed; }
+  .partition-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .partition-head h3 { margin: 0; font-size: 14.5px; font-family: ui-monospace, monospace; }
+  .change-list { margin: 6px 0 0; padding-left: 20px; }
+  .change-list li { margin: 3px 0; font-size: 13px; }
+  .change-list .mono { color: var(--accent); }
+  .arrow { color: var(--purple); font-weight: 700; }
+  details.partition-details summary { color: var(--muted); font-size: 13px; }
 </style>
 </head>
 <body>
 <header>
-  <h1>🛫 航段时间清洗 · DST 安全入仓</h1>
-  <p>把地服导出的「当地时间」航段解析为唯一 UTC 航段链，避免夏令时切换时错误入仓。</p>
+  <h1>🛫 航段数据工程工作台</h1>
+  <p>DST 安全入仓清洗 · UTC 起飞日分区回填计划</p>
+  <nav>
+    <button id="tab-clean" class="active" type="button">① 时间清洗（DST）</button>
+    <button id="tab-backfill" type="button">② 回填计划</button>
+  </nav>
 </header>
 <main>
+  <!-- ======================= 视图一：DST 清洗 ======================= -->
+  <section id="view-clean">
   <div class="card">
     <div class="upload-bar">
       <input type="file" id="fileInput" accept=".csv,text/csv">
@@ -118,16 +166,78 @@
 
   <div id="summary"></div>
   <div id="results"></div>
+  </section>
+
+  <!-- ======================= 视图二：回填计划 ======================= -->
+  <section id="view-backfill" class="hidden">
+  <div class="card">
+    <div class="upload-bar" style="align-items:stretch">
+      <div class="file-slot">
+        <span class="slot-title">仓内版全量 CSV <span class="tag wh">warehouse</span></span>
+        <input type="file" id="whInput" accept=".csv,text/csv">
+        <span class="file-name" id="whName">未选择文件</span>
+      </div>
+      <div class="file-slot">
+        <span class="slot-title">更正版全量 CSV <span class="tag co">corrected</span></span>
+        <input type="file" id="coInput" accept=".csv,text/csv">
+        <span class="file-name" id="coName">未选择文件</span>
+      </div>
+    </div>
+    <div class="upload-bar" style="margin-top:12px">
+      <button class="secondary" id="bfSampleBtn">📦 载入回填演示样例（两份）</button>
+      <button id="bfPlanBtn" disabled>生成回填计划</button>
+      <span class="spacer"></span>
+      <button class="export" id="bfDownloadBtn" disabled>⬇ 下载 JSON 计划</button>
+    </div>
+    <details>
+      <summary>回填分区规则与 CSV 格式</summary>
+      <p>两份 CSV 必须是<b>同一张航段事实表</b>的全量数据，必需表头一致（UTF-8）：</p>
+      <p><code>segment_id,tail_number,dep_utc,arr_utc</code></p>
+      <ul>
+        <li><code>segment_id</code>：唯一航段 ID，单份文件内不得重复；</li>
+        <li><code>tail_number</code>：机尾号；<code>dep_utc / arr_utc</code>：起降 UTC，ISO 8601 带 <code>Z</code> 或偏移量。</li>
+      </ul>
+      <ul>
+        <li>按 <code>dep_utc</code> 的 <b>UTC 起飞日</b>划分分区，比较时忽略行序；</li>
+        <li>只安排<b>内容有变</b>的分区，内容完全一致的分区不出现在计划中；</li>
+        <li>航段迁日时，<b>迁出与迁入分区必须同批替换</b>（并查集合并，含多跳迁日链）；互不牵连的分区分开成批；</li>
+        <li>每个待替换分区携带<b>更正版的全部行</b>；更正版已清空的分区同样列出（行数 0，标记清空）；</li>
+        <li>ID 重复或 UTC 时间无效 → 报错并<b>停止生成计划</b>，不会产生任何批次。</li>
+      </ul>
+    </details>
+  </div>
+
+  <div class="card error-box" id="bf-error"></div>
+  <div id="bf-summary"></div>
+  <div id="bf-changes"></div>
+  <div id="bf-batches"></div>
+  </section>
 </main>
-<footer>仅整链唯一解的机尾允许入仓 · 重复时刻双候选求解 · 不存在时刻硬性报错</footer>
+<footer id="pageFooter">仅整链唯一解的机尾允许入仓 · 重复时刻双候选求解 · 不存在时刻硬性报错</footer>
 
 <script>
-let currentFile = null;
-let lastResult = null;
-
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g,
   c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+/* --------------------------- Tab 切换 --------------------------- */
+$('tab-clean').addEventListener('click', () => switchTab('clean'));
+$('tab-backfill').addEventListener('click', () => switchTab('backfill'));
+
+function switchTab(name) {
+  const clean = name === 'clean';
+  $('tab-clean').classList.toggle('active', clean);
+  $('tab-backfill').classList.toggle('active', !clean);
+  $('view-clean').classList.toggle('hidden', !clean);
+  $('view-backfill').classList.toggle('hidden', clean);
+  $('pageFooter').textContent = clean
+    ? '仅整链唯一解的机尾允许入仓 · 重复时刻双候选求解 · 不存在时刻硬性报错'
+    : '只替换内容有变的分区 · 迁日迁出/迁入同批 · 清空分区也要列出';
+}
+
+/* --------------------------- 视图一：DST 清洗 --------------------------- */
+let currentFile = null;
+let lastResult = null;
 
 const STATUS_META = {
   unique:      {label: '唯一解 · 可导出',   cls: 'unique'},
@@ -313,6 +423,184 @@ async function doExport(tail) {
   a.download = m ? m[1] : 'utc_export.csv';
   a.click();
   URL.revokeObjectURL(a.href);
+}
+
+/* --------------------------- 视图二：回填计划 --------------------------- */
+let whFile = null, coFile = null, lastPlan = null;
+
+function refreshPlanButton() {
+  $('bfPlanBtn').disabled = !(whFile && coFile);
+}
+
+$('whInput').addEventListener('change', (e) => {
+  whFile = e.target.files[0] || null;
+  $('whName').textContent = whFile ? whFile.name : '未选择文件';
+  refreshPlanButton();
+});
+$('coInput').addEventListener('change', (e) => {
+  coFile = e.target.files[0] || null;
+  $('coName').textContent = coFile ? coFile.name : '未选择文件';
+  refreshPlanButton();
+});
+
+$('bfSampleBtn').addEventListener('click', async () => {
+  const [whResp, coResp] = await Promise.all([
+    fetch('/api/backfill/sample/warehouse'),
+    fetch('/api/backfill/sample/corrected'),
+  ]);
+  const whBlob = await whResp.blob();
+  const coBlob = await coResp.blob();
+  whFile = new File([whBlob], 'backfill_warehouse.csv', {type: 'text/csv'});
+  coFile = new File([coBlob], 'backfill_corrected.csv', {type: 'text/csv'});
+  $('whName').textContent = '已载入样例 backfill_warehouse.csv';
+  $('coName').textContent = '已载入样例 backfill_corrected.csv';
+  $('whInput').value = '';
+  $('coInput').value = '';
+  refreshPlanButton();
+});
+
+function hideBfError() {
+  const el = $('bf-error');
+  el.style.display = 'none';
+  el.innerHTML = '';
+}
+function showBfErrors(detail, errors) {
+  const el = $('bf-error');
+  const items = (errors || [detail || '生成失败']).map(e => `<li>${esc(e)}</li>`).join('');
+  el.innerHTML = `<b>⛔ ${esc(detail || '输入校验失败，已停止生成计划')}</b>
+    <ul style="margin:6px 0">${items}</ul>`;
+  el.style.display = 'block';
+}
+
+$('bfPlanBtn').addEventListener('click', async () => {
+  hideBfError();
+  $('bf-batches').innerHTML = '';
+  $('bf-summary').innerHTML = '';
+  $('bf-changes').innerHTML = '';
+  $('bfDownloadBtn').disabled = true;
+  lastPlan = null;
+  const fd = new FormData();
+  fd.append('warehouse', whFile);
+  fd.append('corrected', coFile);
+  $('bfPlanBtn').disabled = true;
+  try {
+    const resp = await fetch('/api/backfill/plan', {method: 'POST', body: fd});
+    const data = await resp.json();
+    if (!resp.ok) {
+      showBfErrors(data.detail, data.errors);
+      return;
+    }
+    lastPlan = data;
+    renderBackfill(data);
+    $('bfDownloadBtn').disabled = false;
+  } catch (err) {
+    showBfErrors('请求失败: ' + err, null);
+  } finally {
+    $('bfPlanBtn').disabled = false;
+  }
+});
+
+$('bfDownloadBtn').addEventListener('click', () => {
+  if (!lastPlan) return;
+  const blob = new Blob([JSON.stringify(lastPlan, null, 2)],
+                        {type: 'application/json;charset=utf-8'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'backfill_plan.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+
+function renderBackfill(plan) {
+  const s = plan.summary;
+  $('bf-summary').innerHTML = `<div class="summary-chips">
+    <span class="chip">仓内版 ${s.warehouse_rows} 行</span>
+    <span class="chip">更正版 ${s.corrected_rows} 行</span>
+    <span class="chip">涉及分区 ${s.total_partitions}</span>
+    <span class="chip amber">待替换 ${s.partitions_to_replace}</span>
+    <span class="chip green">批次 ${s.batch_count}</span>
+    <span class="chip purple">迁日 ${s.migrated_segments}</span>
+    <span class="chip">行内修改 ${s.modified_segments}</span>
+    <span class="chip green">新增 ${s.added_segments}</span>
+    <span class="chip red">删除 ${s.removed_segments}</span>
+    <span class="chip amber">清空分区 ${s.cleared_partitions}</span>
+    <span class="chip">未变跳过 ${s.unchanged_partitions}</span>
+  </div>
+  <p class="note">分区键：${esc(plan.partition_key)} ｜ 生成时间（UTC）：${esc(plan.generated_at)}</p>`;
+  renderChanges(plan.changes);
+  $('bf-batches').innerHTML = plan.batches.map(renderBatch).join('');
+  document.querySelectorAll('details.partition-details').forEach(d => {
+    d.addEventListener('toggle', () => {
+      d.querySelector('summary').textContent =
+        d.open ? '收起更正版全量行' : '查看更正版全量行（JSON 计划中 replacement_rows）';
+    });
+  });
+}
+
+function renderChanges(changes) {
+  const mig = changes.migrated.map(m =>
+    `<li>航段 <span class="mono">${esc(m.segment_id)}</span>（${esc(m.tail_number)}）迁日：
+      <span class="mono">${esc(m.from_partition)}</span> <span class="arrow">→</span>
+      <span class="mono">${esc(m.to_partition)}</span>
+      <span class="note">（${esc(m.warehouse_dep_utc)} → ${esc(m.corrected_dep_utc)}，两分区同批）</span></li>`
+  ).join('');
+  const mod = changes.modified.map(m =>
+    `<li>航段 <span class="mono">${esc(m.segment_id)}</span> 在分区
+      <span class="mono">${esc(m.partition)}</span> 内行内修改：
+      <span class="note">dep ${esc(m.warehouse.dep_utc)} → ${esc(m.corrected.dep_utc)}
+      ｜ arr ${esc(m.warehouse.arr_utc)} → ${esc(m.corrected.arr_utc)}</span></li>`
+  ).join('');
+  const add = changes.added.map(r =>
+    `<li>新增航段 <span class="mono">${esc(r.segment_id)}</span>（${esc(r.tail_number)}）
+      起飞 <span class="mono">${esc(r.dep_utc)}</span></li>`).join('');
+  const rm = changes.removed.map(r =>
+    `<li>删除航段 <span class="mono">${esc(r.segment_id)}</span>（${esc(r.tail_number)}）
+      原起飞 <span class="mono">${esc(r.dep_utc)}</span></li>`).join('');
+  $('bf-changes').innerHTML = `<div class="card">
+    <div class="tail-head"><h2>🔍 航段级变更</h2></div>
+    <ul class="change-list">
+      ${mig || '<li class="note">无迁日航段</li>'}
+      ${mod || ''}${add || ''}${rm || ''}
+    </ul></div>`;
+}
+
+function renderBatch(batch) {
+  const isMigration = batch.partition_count > 1;
+  const badge = isMigration
+    ? `<span class="badge migration">迁日牵连 · 必须同批</span>`
+    : `<span class="badge standalone">独立批次</span>`;
+  const parts = batch.partitions.map(renderPartition).join('');
+  return `<div class="card batch-card${isMigration ? ' migration' : ''}">
+    <div class="batch-head">
+      <h2>批次 #${batch.batch_id}</h2>
+      ${badge}
+      <span class="note">${esc(batch.reason)}</span>
+      <span class="spacer"></span>
+      <span class="chip">分区 ${batch.partition_count} 个 ｜ 替换行合计 ${batch.total_replacement_rows}</span>
+    </div>
+    ${parts}
+  </div>`;
+}
+
+function renderPartition(p) {
+  const rows = p.replacement_rows.map(r =>
+    `<tr><td>${esc(r.segment_id)}</td><td>${esc(r.tail_number)}</td>
+      <td>${esc(r.dep_utc)}</td><td>${esc(r.arr_utc)}</td></tr>`).join('');
+  const clearedBadge = p.cleared ? `<span class="badge cleared">⬇ 更正版已清空（0 行，回填时清空该分区）</span>` : '';
+  const tableOrNote = p.cleared
+    ? `<p class="note">该分区在更正版中没有任何航段，回填动作 = 清空分区 <span class="mono">${esc(p.date)}</span>。</p>`
+    : `<details class="partition-details"><summary>查看更正版全量行（JSON 计划中 replacement_rows）</summary>
+        <table><thead><tr><th>segment_id</th><th>tail_number</th><th>dep_utc</th><th>arr_utc</th></tr></thead>
+        <tbody>${rows}</tbody></table></details>`;
+  return `<div class="partition-block${p.cleared ? ' cleared' : ''}">
+    <div class="partition-head">
+      <h3>📅 ${esc(p.date)}</h3>
+      ${clearedBadge}
+      <span class="spacer"></span>
+      <span class="note">仓内 ${p.warehouse_row_count} 行 → 更正 ${p.corrected_row_count} 行</span>
+    </div>
+    ${tableOrNote}
+  </div>`;
 }
 </script>
 </body>

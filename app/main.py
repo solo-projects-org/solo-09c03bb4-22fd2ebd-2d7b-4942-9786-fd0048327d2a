@@ -1,19 +1,22 @@
-"""FastAPI 入口：航段时间清洗（DST 安全入仓）。"""
+"""FastAPI 入口：航段时间清洗（DST 安全入仓）与起飞日分区回填计划。"""
 from __future__ import annotations
 
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 
+from .backfill import BackfillValidationError, build_backfill_plan
 from .solver import CsvFormatError, build_export_csv, solve_csv
 
 BASE_DIR = Path(__file__).resolve().parent
 SAMPLE_PATH = BASE_DIR.parent / "samples" / "dst_sample.csv"
+BACKFILL_WAREHOUSE_SAMPLE = BASE_DIR.parent / "samples" / "backfill_warehouse.csv"
+BACKFILL_CORRECTED_SAMPLE = BASE_DIR.parent / "samples" / "backfill_corrected.csv"
 INDEX_PATH = BASE_DIR / "static" / "index.html"
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
 
-app = FastAPI(title="航段时间清洗 · DST 安全入仓", version="1.0.0")
+app = FastAPI(title="航段时间清洗 · DST 安全入仓 / 分区回填计划", version="2.0.0")
 
 
 async def _read_csv_text(file: UploadFile) -> str:
@@ -78,6 +81,50 @@ async def export(file: UploadFile = File(...), tail: str = Form(...)):
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# ---------------------------------------------------------------------------
+# 回填计划
+# ---------------------------------------------------------------------------
+
+@app.get("/api/backfill/sample/warehouse", include_in_schema=False)
+async def backfill_sample_warehouse():
+    """回填演示用：仓内版事实表样例。"""
+    return FileResponse(
+        BACKFILL_WAREHOUSE_SAMPLE, media_type="text/csv; charset=utf-8",
+        filename="backfill_warehouse.csv")
+
+
+@app.get("/api/backfill/sample/corrected", include_in_schema=False)
+async def backfill_sample_corrected():
+    """回填演示用：更正版事实表样例。"""
+    return FileResponse(
+        BACKFILL_CORRECTED_SAMPLE, media_type="text/csv; charset=utf-8",
+        filename="backfill_corrected.csv")
+
+
+@app.post("/api/backfill/plan")
+async def backfill_plan(
+    warehouse: UploadFile = File(..., description="仓内版全量 CSV"),
+    corrected: UploadFile = File(..., description="更正版全量 CSV"),
+):
+    """对比同一张航段事实表的仓内版与更正版，返回分区回填计划 JSON。
+
+    - 按 dep_utc 的 UTC 起飞日分区，行序不影响结果；
+    - 只安排内容有变的分区；航段迁日时迁出/迁入分区同批；
+    - 每个待替换分区带更正版全部行，清空分区也列出；
+    - ID 重复或 UTC 非法时返回 400 且 detail 为全部错误，不生成计划。
+    """
+    wh_text = await _read_csv_text(warehouse)
+    co_text = await _read_csv_text(corrected)
+    try:
+        plan = build_backfill_plan(wh_text, co_text)
+    except BackfillValidationError as exc:
+        return JSONResponse(status_code=400, content={
+            "detail": "输入校验失败，已停止生成计划",
+            "errors": exc.errors,
+        })
+    return plan
 
 
 @app.get("/api/health", include_in_schema=False)
